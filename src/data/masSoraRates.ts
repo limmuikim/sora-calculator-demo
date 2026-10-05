@@ -406,14 +406,43 @@ export const MAS_SORA_HISTORICAL_DATA: SoraDailyRecord[] = [
 ];
 
 /**
- * Fetch latest MAS SORA records from the official MAS public datastore API.
- * Falls back to verified benchmark dataset if network is unavailable.
+ * Fetch latest MAS SORA records.
+ * Prioritizes the dedicated serverless connection (/api/sora) which connects
+ * to the official MAS API Gateway using KeyId header.
+ * Falls back to public MAS datastore or verified benchmark dataset.
  */
 export async function fetchLiveMasSoraData(): Promise<{
   data: SoraDailyRecord[];
   isLive: boolean;
   lastUpdated: string;
+  source?: string;
 }> {
+  // 1. Try serverless MAS connection (/api/sora)
+  try {
+    const soraResponse = await fetch('/api/sora?limit=60', {
+      headers: { Accept: 'application/json' },
+    });
+    if (soraResponse.ok) {
+      const soraJson = await soraResponse.json();
+      if (soraJson?.success && Array.isArray(soraJson.records) && soraJson.records.length > 0) {
+        return {
+          data: soraJson.records,
+          isLive: true,
+          lastUpdated:
+            new Date().toLocaleTimeString('en-SG', {
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: 'Asia/Singapore',
+            }) + ' SGT',
+          source: 'MAS Gateway (/api/sora)',
+        };
+      }
+    }
+  } catch {
+    // Continue to fallback
+  }
+
+  // 2. Try public MAS open datastore fallback
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -459,6 +488,7 @@ export async function fetchLiveMasSoraData(): Promise<{
               minute: '2-digit',
               timeZone: 'Asia/Singapore',
             }) + ' SGT',
+            source: 'MAS Datastore API',
           };
         }
       }
@@ -471,6 +501,7 @@ export async function fetchLiveMasSoraData(): Promise<{
     data: MAS_SORA_HISTORICAL_DATA,
     isLive: false,
     lastUpdated: '09:00 SGT (MAS Publication Standard)',
+    source: 'MAS Historical Benchmark',
   };
 }
 
